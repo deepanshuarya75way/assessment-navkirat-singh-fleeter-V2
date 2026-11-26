@@ -1,0 +1,678 @@
+"use client";
+
+import dynamic from "next/dynamic";
+import axios from "axios";
+import React, { useEffect, useState } from "react";
+import { AlertCircle, Loader2, Zap } from "lucide-react";
+
+import { Card } from "@/components/ui/card";
+import { PanelContent } from "@/components/PanelContent";
+import { IUser } from "@/models/user-model";
+import { PaymentStatus } from "@/models/booking-model";
+import RideCompleted from "@/components/RideCompleted";
+import { getSocket } from "@/lib/socket";
+import { log } from "node:console";
+
+const LiveRideMap = dynamic(
+  () => import("@/components/LiveRideMap"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-full w-full bg-[#f0fdf4]" />
+    ),
+  }
+);
+
+export type BookingStatus =
+  | "idle"
+  | "requested"
+  | "awaiting_payment"
+  | "confirmed"
+  | "started"
+  | "completed"
+  | "cancelled"
+  | "rejected"
+  | "expired";
+
+export interface IBooking {
+  _id: string;
+
+  user?: IUser;
+
+  driver?: string | IUser;
+
+  vehicle?: {
+    _id?: string;
+    owner?: string;
+    type?: string;
+    vehicleModel?: string;
+    number?: string;
+  };
+
+  bookingStatus: BookingStatus;
+
+  paymentStatus: PaymentStatus;
+
+  fare: number;
+
+  driverMobileNumber?: string;
+
+  userMobileNumber?: string;
+
+  pickUpAddress?: string;
+
+  dropAddress?: string;
+
+  pickupLocation?: {
+    type: "Point";
+    coordinates: [number, number];
+  };
+
+  dropLocation?: {
+    type: "Point";
+    coordinates: [number, number];
+  };
+
+  createdAt?: string;
+
+  updatedAt?: string;
+}
+
+export const MAP_STATUS: Record<
+  string,
+  "arriving" | "ongoing" | "completed"
+> = {
+  idle: "arriving",
+  requested: "arriving",
+  awaiting_payment: "arriving",
+  confirmed: "arriving",
+  started: "ongoing",
+  completed: "completed",
+  cancelled: "completed",
+  rejected: "completed",
+  expired: "completed",
+};
+
+export const STATUS_LABEL: Record<
+  BookingStatus,
+  {
+    label: string;
+    sublabel: string;
+    dot: string;
+    bgColor: string;
+  }
+> = {
+  idle: {
+    label: "Awaiting Confirmation",
+    sublabel: "Booking is being processed",
+    dot: "bg-amber-400",
+    bgColor: "bg-amber-50",
+  },
+
+  requested: {
+    label: "Awaiting Confirmation",
+    sublabel: "Booking is being processed",
+    dot: "bg-amber-400",
+    bgColor: "bg-amber-50",
+  },
+
+  awaiting_payment: {
+    label: "Payment Pending",
+    sublabel: "Customer payment is pending",
+    dot: "bg-purple-400",
+    bgColor: "bg-purple-50",
+  },
+
+  confirmed: {
+    label: "Heading to Pickup",
+    sublabel: "Drive to the pickup location",
+    dot: "bg-emerald-400",
+    bgColor: "bg-emerald-50",
+  },
+
+  started: {
+    label: "Ride in Progress",
+    sublabel: "Heading to drop location",
+    dot: "bg-blue-400",
+    bgColor: "bg-blue-50",
+  },
+
+  completed: {
+    label: "Ride Completed",
+    sublabel: "Trip has ended successfully",
+    dot: "bg-green-400",
+    bgColor: "bg-green-50",
+  },
+
+  cancelled: {
+    label: "Ride Cancelled",
+    sublabel: "This ride was cancelled",
+    dot: "bg-red-400",
+    bgColor: "bg-red-50",
+  },
+
+  rejected: {
+    label: "Ride Rejected",
+    sublabel: "Ride was rejected",
+    dot: "bg-red-400",
+    bgColor: "bg-red-50",
+  },
+
+  expired: {
+    label: "Request Expired",
+    sublabel: "Booking timed out",
+    dot: "bg-orange-400",
+    bgColor: "bg-orange-50",
+  },
+};
+
+const Page = () => {
+  const [booking, setBooking] =
+    useState<IBooking | null>(null);
+
+  const [loading, setLoading] = useState(true);
+
+  const [error, setError] =
+    useState<string | null>(null);
+
+  const [driverPos, setDriverPos] =
+    useState<[number, number] | null>(null);
+
+  const [pickUpPos, setPickUpPos] =
+    useState<[number, number] | null>(null);
+
+  const [dropPos, setDropPos] =
+    useState<[number, number] | null>(null);
+  // console.log(driverPos);
+   navigator.geolocation.getCurrentPosition((position) => {
+        console.log(position.coords);
+        
+});
+  
+  const [lastUpdateTime , setLastUpdateTime] = useState<number>(Date.now())
+
+  const [isStale , setIsStale] = useState(false)
+  
+  const TIME_REQ = 10000
+
+
+  const [distanceToPickUp, setDistanceToPickUp] =
+    useState(0);
+
+  const [distanceToDrop, setDistanceToDrop] =
+    useState(0);
+
+  const [etaToPickUp, setEtaToPickUp] =
+    useState(0);
+
+  const [etaToDrop, setEtaToDrop] =
+    useState(0);
+
+  const [status, setStatus] =
+    useState<BookingStatus>("idle");
+
+  const [totalDistance, setTotalDistance] =
+    useState<number>(0);
+
+  const [actionLoading, setActionLoading] =
+    useState(false);
+
+  const fetchActiveBooking = async () => {
+    try {
+      setLoading(true);
+
+      const response = await axios.get(
+        "/api/partner/my-active"
+      );
+
+      const ride =
+        response.data.activeRide as IBooking | null;
+
+      if (!ride) {
+        setBooking(null);
+        setStatus("idle");
+        setDriverPos(null);
+        setPickUpPos(null);
+        setDropPos(null);
+        setError("No active ride found");
+        return;
+      }
+
+      setBooking(ride);
+
+      setStatus(
+        ride.bookingStatus || "idle"
+      );
+
+      if (ride?.pickupLocation?.coordinates) {
+        setPickUpPos([
+          ride.pickupLocation.coordinates[1],
+          ride.pickupLocation.coordinates[0],
+        ]);
+      }
+
+      if (ride?.dropLocation?.coordinates) {
+        setDropPos([
+          ride.dropLocation.coordinates[1],
+          ride.dropLocation.coordinates[0],
+        ]);
+      }
+
+      setError(null);
+    } catch (err: any) {
+      const message =
+        err?.response?.data?.message ||
+        err?.message ||
+        "No active ride found";
+
+      setError(message);
+      setBooking(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+  /*
+   * Get driver's current location
+   */
+  useEffect(() => {
+    if (!booking?._id) return;
+
+    // if (typeof window === "undefined") return;
+
+    if (!navigator.geolocation) {
+      setError(
+        "Geolocation is not supported by your browser"
+      );
+      return;
+    }
+
+    const socket = getSocket();
+    navigator.geolocation.getCurrentPosition((position) => {
+        console.log(position.coords);
+        
+});
+    const watchId =
+      navigator.geolocation.watchPosition(
+        (pos) => {
+          const {
+            latitude,
+            longitude,
+          } = pos.coords;
+          console.log(latitude, longitude);
+          
+          setDriverPos([
+            latitude,
+            longitude,
+          ]);
+
+          socket.emit(
+            "update-driver-location",
+            {
+              bookingId: booking._id,
+              latitude,
+              longitude,
+              status,
+            }
+          );
+        },
+        (err) => {
+          console.error(
+            "Geolocation error:",
+            err
+          );
+        },
+        {
+          enableHighAccuracy: false,
+          maximumAge: 2000,
+          timeout: 10000,
+        }
+      );
+
+    return () => {
+      navigator.geolocation.clearWatch(
+        watchId
+      );
+    };
+  }, [booking?._id, status]);
+
+// useEffect(() => {
+//     if (!booking?._id) return;
+
+
+//     if (!navigator.geolocation) {
+//       setError(
+//         "Geolocation is not supported by your browser"
+//       );
+//       return;
+//     }
+
+//     const socket = getSocket();
+//     navigator.geolocation.getCurrentPosition((position) => {
+//         console.log(position.coords);
+        
+// });
+//     return () => {
+//     };
+//   }, [booking?._id, status]);
+
+  /*
+   * Join ride socket room
+   */
+  useEffect(() => {
+    if (!booking?._id) return;
+
+    // if (typeof window === "undefined") return;
+
+    const socket = getSocket();
+
+    socket.emit(
+      "join-ride",
+      booking._id
+    );
+
+    const handleDriverLocation = ({
+      latitude,
+      longitude,
+    }: {
+      latitude: number;
+      longitude: number;
+    }) => {
+      setDriverPos([
+        latitude,
+        longitude,
+      ]);
+      setLastUpdateTime(Date.now())
+    };
+
+    socket.on(
+      "driver-location",
+      handleDriverLocation
+    );
+
+    return () => {
+      socket.off(
+        "driver-location",
+        handleDriverLocation
+      );
+    };
+  }, [booking?._id]);
+
+  useEffect(() => {
+
+    setIsStale(false)
+    const interval = setInterval(() => {
+      const timeSinceUpdate = Date.now() - lastUpdateTime;
+      if (timeSinceUpdate > TIME_REQ){
+        setIsStale(true)
+      }
+    },1000)
+
+    return (() => clearInterval(interval)) 
+  },[lastUpdateTime, driverPos])
+  /*
+   * Fetch active ride
+   */
+  useEffect(() => {
+    fetchActiveBooking();
+  }, []);
+
+  const handleArriveAtPickup = async () => {
+    if (!booking) return;
+
+    try {
+      setActionLoading(true);
+
+      await axios.patch(
+        `/api/partner/booking/${booking._id}/arrive-pickup`
+      );
+
+      await fetchActiveBooking();
+    } catch (err: any) {
+      alert(
+        err?.response?.data?.message ||
+          "Failed to update status"
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleStartRide = async () => {
+    if (!booking) return;
+
+    try {
+      setActionLoading(true);
+
+      await axios.patch(
+        `/api/partner/booking/${booking._id}/start-ride`
+      );
+
+      await fetchActiveBooking();
+    } catch (err: any) {
+      alert(
+        err?.response?.data?.message ||
+          "Failed to start ride"
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  /*
+   * Loading
+   */
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-white via-[#f8fffb] to-[#f0fdf4]">
+        <Card className="rounded-3xl p-8 text-center">
+          <Loader2
+            className="mx-auto animate-spin text-[#22c55e]"
+            size={40}
+          />
+
+          <p className="mt-4 text-gray-600">
+            Fetching active ride...
+          </p>
+        </Card>
+      </div>
+    );
+  }
+
+  /*
+   * No active ride
+   */
+  if (error || !booking) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-white via-[#f8fffb] to-[#f0fdf4] p-4">
+        <Card className="w-full max-w-md rounded-3xl p-8 text-center">
+          <AlertCircle
+            size={48}
+            className="mx-auto mb-4 text-amber-500"
+          />
+
+          <h2 className="mb-2 text-lg font-bold text-gray-900">
+            No Active Ride
+          </h2>
+
+          <p className="mb-6 text-sm text-gray-500">
+            {error ||
+              "You don't have an active ride right now."}
+          </p>
+
+          <button
+            onClick={() =>
+              window.location.reload()
+            }
+            className="w-full rounded-xl bg-[#22c55e] px-6 py-3 font-semibold text-white transition-colors hover:bg-[#16a34a]"
+          >
+            Refresh
+          </button>
+        </Card>
+      </div>
+    );
+  }
+
+  /*
+   * Ride completed
+   */
+  if (status === "completed") {
+    return (
+      <RideCompleted
+        fare={booking.fare || 0}
+        customerName={
+          booking.user?.name ||
+          "Customer"
+        }
+        paymentStatus={
+          booking.paymentStatus
+        }
+      />
+    );
+  }
+
+  const statusKey =
+    booking.bookingStatus || "idle";
+
+  const statusInfo =
+    STATUS_LABEL[
+      statusKey as BookingStatus
+    ] || STATUS_LABEL.idle;
+
+  const displayEta =
+    status === "confirmed"
+      ? etaToPickUp
+      : etaToDrop;
+
+  return (
+    <div className="flex h-screen w-full flex-col overflow-hidden bg-white">
+
+      {/* MAP */}
+      <div className="relative z-0 flex-1 overflow-hidden">
+        <LiveRideMap
+          driverLocation={driverPos}
+          pickUpLocation={pickUpPos}
+          dropLocation={dropPos}
+          isStale = {isStale}
+          mapStatus={
+            MAP_STATUS[
+              booking.bookingStatus!
+            ]
+          }
+          onStats={({
+            distanceToPickUp,
+            etaToPickUp,
+            distanceToDrop,
+            etaToDrop,
+            totalDistance,
+          }) => {
+            setDistanceToPickUp(
+              distanceToPickUp
+            );
+
+            setEtaToPickUp(
+              etaToPickUp
+            );
+
+            setDistanceToDrop(
+              distanceToDrop
+            );
+
+            setEtaToDrop(
+              etaToDrop
+            );
+
+            setTotalDistance(
+              totalDistance
+            );
+          }}
+        />
+        {/* STATUS */}
+        <div className="pointer-events-auto absolute left-1/2 top-6 z-[9999] -translate-x-1/2">
+          <div
+            className={`flex items-center gap-3 ${statusInfo.bgColor} rounded-3xl border-2 border-current px-6 py-3 shadow-2xl backdrop-blur-lg`}
+          >
+            <span
+              className={`h-3 w-3 rounded-full ${statusInfo.dot} animate-pulse`}
+            />
+
+            <div>
+              <p className="text-sm font-bold text-gray-900">
+                {statusInfo.label}
+              </p>
+
+              <p className="text-xs text-gray-600">
+                {statusInfo.sublabel}
+              </p>
+            </div>
+
+            {[
+              "confirmed",
+              "started",
+            ].includes(status) && (
+              <div className="ml-2 inline-flex items-center gap-1 rounded-full bg-white/80 px-2.5 py-1">
+                <Zap
+                  size={12}
+                  className="text-[#16a34a]"
+                />
+
+                <span className="text-xs font-bold text-gray-900">
+                  {Math.round(
+                    displayEta
+                  )}{" "}
+                  min
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* BOTTOM PANEL */}
+      <div className="z-40 max-h-[65vh] w-full overflow-y-auto rounded-t-3xl border-t-2 border-gray-200 bg-white shadow-2xl">
+
+        <div className="flex justify-center pt-4 pb-2">
+          <div className="h-1 w-12 rounded-full bg-gray-300" />
+        </div>
+
+        <div className="border-b border-[#ecfdf5] bg-[#22c55e] px-6 py-5">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500">
+            Driver Panel
+          </p>
+
+          <h1 className="text-2xl font-black text-white">
+            Active Ride
+          </h1>
+          {
+          isStale && <div style={{color : "black", fontSize : "20px"}}>Live Tracking is not currently unavailable so showing only last location</div>
+        }
+        </div>
+
+        <PanelContent
+          booking={booking}
+          bookingId={booking._id}
+          currentRole="driver"
+          status={status}
+          distanceToPickUp={
+            distanceToPickUp
+          }
+          distanceToDrop={
+            distanceToDrop
+          }
+          etaToPickUp={
+            etaToPickUp
+          }
+          etaToDrop={
+            etaToDrop
+          }
+          actionLoading={
+            actionLoading
+          }
+        />
+
+        <div className="h-4" />
+      </div>
+    </div>
+  );
+};
+
+export default Page;
