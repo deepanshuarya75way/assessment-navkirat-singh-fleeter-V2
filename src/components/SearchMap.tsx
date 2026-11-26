@@ -161,7 +161,6 @@ export default function SearchMap({
       const r = data.routes[0];
       if (!r) return;
 
-      // Flip OSRM [lon, lat] to Leaflet [lat, lon]
       setRoute(
         r.geometry.coordinates.map(([lon, lat]: [number, number]) => [lat, lon])
       );
