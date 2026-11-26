@@ -31,8 +31,35 @@ type LocationSuggestion = {
   lat?: number;
   lng?: number;
 };
+type RideStop  = {
+  address : string,
+  lat? : number,
+  lon? : number
+}
 
 const GEO_API_KEY = process.env.NEXT_PUBLIC_GEOAPIFY_KEY;
+const geocodeStop = async (address: string): Promise<RideStop> => {
+  const { data } = await axios.get(
+    `https://photon.komoot.io/api/?q=${encodeURIComponent(address)}&limit=1`
+  );
+  
+  // Change data?.feature?.[0] to data?.features?.[0]
+  const feature = data?.features?.[0];
+  
+  if (!feature) throw new Error("Could not find location");
+
+  const [lon, lat] = feature.geometry.coordinates;
+  const props = feature.properties ?? {};
+
+  return {
+    address:
+      [props.name, props.street, props.city, props.state]
+        .filter(Boolean)
+        .join(", ") || address,
+    lat,
+    lon,
+  };
+};
 
 // ✅ GEOAPIFY AUTOCOMPLETE
 const getCurrentAddress = async (q: string) => {
@@ -270,7 +297,24 @@ export default function BookRidePage() {
 
   const [dropLatitude, setDropLatitude] = useState<number>();
   const [dropLongitude, setDropLongitude] = useState<number>();
+  const [stops, setStops] = useState<RideStop[]>([])
+  const [resolvingStops, setResolvingStops] = useState(false)
 
+  const updateStop = (index : number, address : string) => {
+    setStops(curr => curr.map((stop,i) => i === index ? {address} : stop))
+  }
+
+  const resolveStop = async (index : number) => {
+    const address = stops[index]?.address?.trim()
+    if (!address) return
+    try{
+      const resolved = await geocodeStop(address)
+      setStops(curr => curr.map((stop,i) => i === index ? resolved : stop))
+    } catch (error){
+      console.error(error);
+      
+    }
+  }
   const formatLocation = (feature: any): LocationSuggestion => {
     const p = feature?.properties ?? {};
     return {
@@ -338,88 +382,166 @@ export default function BookRidePage() {
 
   return (
     <div className="min-h-screen bg-white text-zinc-900">
-      <div className="mx-auto max-w-[560px] px-4 py-6 space-y-4">
-
-        {/* Vehicle */}
-        <SectionCard title="CHOOSE VEHICLE" step={1}>
-          <div className="grid grid-cols-2 gap-3">
-            {vehicles.map((v) => (
-              <VehicleTile
-                key={v.key}
-                vehicle={v}
-                active={selectedVehicle === v.key}
-                onClick={() => setSelectedVehicle(v.key)}
-              />
-            ))}
-          </div>
-        </SectionCard>
-
-        {/* Mobile */}
-        <SectionCard title="MOBILE" step={2}>
-          <GreenInput
-            value={mobile}
-            onChange={setMobile}
-            placeholder="Enter mobile"
-            icon={<PhoneCall className="h-4 w-4" />}
+  <div className="mx-auto max-w-[560px] px-4 py-6 space-y-4">
+    {/* Vehicle */}
+    <SectionCard title="CHOOSE VEHICLE" step={1}>
+      <div className="grid grid-cols-2 gap-3">
+        {vehicles.map((v) => (
+          <VehicleTile
+            key={v.key}
+            vehicle={v}
+            active={selectedVehicle === v.key}
+            onClick={() => setSelectedVehicle(v.key)}
           />
-        </SectionCard>
-
-        {/* Route */}
-        <SectionCard title="ROUTE" step={3}>
-          <div className="space-y-3">
-
-            <RouteField
-              label="Pickup"
-              value={pickup}
-              onChange={setPickup}
-              placeholder="Pickup location"
-              action={<LocateFixed className="h-4 w-4" />}
-              onClick={getCurrentLocation}
-            />
-            <SuggestionList
-              suggestions={pickUpSuggestions}
-              onSelect={(loc) => {
-                setPickup(loc.subtitle);
-                setPickUpLatitude(loc.lat);
-                setPickUpLongitude(loc.lng);
-                setPickUpSuggestions([]);
-              }}
-            />
-
-            <RouteField
-              label="Drop"
-              value={drop}
-              onChange={setDrop}
-              placeholder="Drop location"
-              action={<Send className="h-4 w-4 -rotate-45" />}
-              onClick={() => {}}
-            />
-            <SuggestionList
-              suggestions={dropSuggestions}
-              onSelect={(loc) => {
-                setDrop(loc.subtitle);
-                setDropLatitude(loc.lat);
-                setDropLongitude(loc.lng);
-                setDropSuggestions([]);
-              }}
-            />
-
-          </div>
-        </SectionCard>
-
-        {/* Continue */}
-        <button
-          onClick={() =>
-            router.push(
-              `/user/search?pickup=${pickup}&drop=${drop}&vehicle=${selectedVehicle}&mobile=${mobile}&pickuplat=${pickUpLatitude ?? ""}&pickuplon=${pickUpLongitude ?? ""}&droplat=${dropLatitude ?? ""}&droplon=${dropLongitude ?? ""}&mobile=${mobile}`
-            )
-          }
-          className="w-full h-14 rounded-2xl bg-green-600 text-white font-bold shadow-lg hover:bg-green-700"
-        >
-          Continue
-        </button>
-
+        ))}
       </div>
-    </div>
+    </SectionCard>
+
+    {/* Mobile */}
+    <SectionCard title="MOBILE" step={2}>
+      <GreenInput
+        value={mobile}
+        onChange={setMobile}
+        placeholder="Enter mobile"
+        icon={<PhoneCall className="h-4 w-4" />}
+      />
+    </SectionCard>
+
+    {/* Route */}
+    <SectionCard title="ROUTE" step={3}>
+      <div className="space-y-3">
+        <RouteField
+          label="Pickup"
+          value={pickup}
+          onChange={setPickup}
+          placeholder="Pickup location"
+          action={<LocateFixed className="h-4 w-4" />}
+          onClick={getCurrentLocation}
+        />
+        <SuggestionList
+          suggestions={pickUpSuggestions}
+          onSelect={(loc) => {
+            setPickup(loc.subtitle);
+            setPickUpLatitude(loc.lat);
+            setPickUpLongitude(loc.lng);
+            setPickUpSuggestions([]);
+          }}
+        />
+
+        <RouteField
+          label="Drop"
+          value={drop}
+          onChange={setDrop}
+          placeholder="Drop location"
+          action={<Send className="h-4 w-4 -rotate-45" />}
+          onClick={() => {}}
+        />
+        <SuggestionList
+          suggestions={dropSuggestions}
+          onSelect={(loc) => {
+            setDrop(loc.subtitle);
+            setDropLatitude(loc.lat);
+            setDropLongitude(loc.lng);
+            setDropSuggestions([]);
+          }}
+        />
+      </div>
+
+      {/* Intermediate Stops */}
+      <div className="mt-4 rounded-2xl border border-dashed border-emerald-400 bg-emerald-50/60 p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-bold text-zinc-900">Intermediate Stops</p>
+            <p className="text-xs text-zinc-500">Add up to 3 stops</p>
+          </div>
+          <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-emerald-700">
+            {stops.length}/3
+          </span>
+        </div>
+
+        <div className="space-y-2">
+          {stops.map((stop, index) => (
+            <div
+              key={index}
+              className="flex items-center gap-2 rounded-xl bg-white px-2 py-1.5 shadow-sm"
+            >
+              <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-emerald-100 text-xs font-bold text-emerald-700">
+                {index + 1}
+              </span>
+              <input
+                type="text"
+                value={stop.address}
+                placeholder={`Enter stop ${index + 1} address`}
+                onChange={(e) => updateStop(index, e.target.value)}
+                onBlur={() => resolveStop(index)}
+                className="w-full bg-transparent text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  setStops((curr) => curr.filter((_, i) => i !== index))
+                }
+                className="rounded-lg p-1.5 text-rose-600 transition hover:bg-rose-50"
+                title="Remove stop"
+              >
+                x
+              </button>
+            </div>
+          ))}
+
+          {stops.length < 3 && (
+            <button
+              type="button"
+              onClick={() => setStops((curr) => [...curr, { address: "" }])}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-white py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-50"
+            >
+              <span className="text-base leading-none">+</span> Add a stop
+            </button>
+          )}
+        </div>
+      </div>
+    </SectionCard>
+
+    {/* Continue */}
+    <button
+      type="button"
+      onClick={async () => {
+        // if (!pickup || !drop || pickUpLatitude == null || dropLatitude == null || dropLongitude == null){
+        //   console.log(pickup, drop, pickUpLatitude, pickUpLongitude, dropLatitude, dropLongitude);
+          
+        //   alert("invalid")
+        //   return
+        // }
+        if (stops.some(stop => !stop.address.trim())){
+          alert("invalid stop")
+          return
+        }
+        setResolvingStops(true)
+        try{
+          const resolvedStops = await Promise.all(stops.map(async stop => stop.lat != null && stop.lon != null ? stop : await geocodeStop(stop.address)))
+          const query = new URLSearchParams({
+          pickup,
+          drop,
+          vehicle: selectedVehicle ?? "",
+          mobile,
+          pickuplat: pickUpLatitude != null ? String(pickUpLatitude) : "",
+          pickuplon: pickUpLongitude != null ? String(pickUpLongitude) : "",
+          droplat: dropLatitude != null ? String(dropLatitude) : "",
+          droplon: dropLongitude != null ? String(dropLongitude) : "",
+          stops: JSON.stringify(resolvedStops),
+        });
+         router.push(`/user/search?${query.toString()}`);
+        } catch (error){
+          console.error(error);
+        }
+      }}
+      disabled={resolvingStops}
+      className="h-14 w-full rounded-2xl bg-green-600 font-bold text-white shadow-lg transition hover:bg-green-700"
+    >
+      {resolvingStops ? "Locating Stops..." : "Continue"}
+    </button>
+  </div>
+</div>
+
   );
 }

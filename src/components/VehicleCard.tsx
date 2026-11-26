@@ -27,6 +27,7 @@ interface IVehicle {
 interface VehicleCardProps {
   vehicle: IVehicle;
   distance: number;
+  segmentDistances : number[]
   onBook: () => void;
 }
 
@@ -34,6 +35,7 @@ export default function VehicleCard({
   vehicle,
   distance,
   onBook,
+  segmentDistances = []
 }: VehicleCardProps) {
   const {
     imageUrl,
@@ -129,7 +131,9 @@ export default function VehicleCard({
           </div>
 
         </div>
-
+          {
+            segmentDistances.length > 0 && segmentDistances.map((seg, idx) => <div>{idx + 1} {seg.toFixed(2)} km / {Math.round(pricePerKm * seg)}</div>)
+          }
         {/* FOOTER */}
         <div className="mt-6 flex items-end justify-between border-t border-[#dcfce7] pt-5">
 

@@ -21,7 +21,6 @@ export interface IBooking extends Document {
   user: Types.ObjectId;
   driver: Types.ObjectId;
   vehicle: Types.ObjectId;
-
   pickUpAddress: string;
   dropAddress: string;
 
@@ -34,7 +33,10 @@ export interface IBooking extends Document {
     type: "Point";
     coordinates: [number, number];
   };
-
+  stops? : {
+    address : string,
+    location : {type : "Point", coordinates : [number, number]}
+  }[];
   fare: number;
 
   driverMobileNumber: string;
@@ -111,7 +113,13 @@ const bookingSchema = new mongoose.Schema<IBooking>(
         required: true,
       },
     },
-
+    stops : [{
+      address : {type : String, required : true, trim : true},
+      location : {
+        type : {type : String, enum : ["Point"], default : "Point"},
+        coordinates : {type : [Number], required : true}
+      }
+    }],
     fare: {
       type: Number,
       required: true,

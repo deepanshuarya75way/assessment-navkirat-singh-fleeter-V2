@@ -51,6 +51,22 @@ function CheckoutContent() {
 
   const pickup = params.get("pickup") || "";
   const drop = params.get("drop") || "";
+  const stops : {address : string, lat :number, lon : number}[] = (() => {
+    try{ 
+      return JSON.parse(params.get("stops") || "[]");
+    } catch {
+      return []
+    }
+})()
+const segmentDistances : number[] = (() => {
+    try{ 
+      return JSON.parse(params.get("segmentDistances") || "[]");
+    } catch {
+      return []
+    }
+})()
+const pricePerKm = Number(params.get("pricePerKm") || 0)
+const baseFare = Number(params.get("baseFare") || 0)
   const vehicle = params.get("vehicle") || "";
   const fare = params.get("fare") || "";
   const driverId = params.get("driverId") || "";
@@ -353,7 +369,9 @@ function CheckoutContent() {
                     className="mt-1 text-[#16a34a]"
                   />
                 </div>
-
+                {
+                  stops.map((stop, idx) => <div>{idx + 1}  {stop.address} <MapPin size={14}/></div>)
+                }
                 {/* Drop */}
                 <div className="flex gap-4 px-5 py-4">
                   <div className="flex flex-col items-center pt-1">
@@ -376,7 +394,29 @@ function CheckoutContent() {
                   />
                 </div>
               </div>
-
+              {/* {
+                stops.length > 0 && <div className="border-t border-[#dcfce7] px-5 py-4">
+                  <p className="mb-3 text-[10px] font-bold uppercase ">Ordered Intermediate Stops</p>
+                  <ol className="space-y-2">{stops.map((stop,index) => <li key={index} className="flex gap-2 text-sm text-gray-600">
+                    <span className="font-bold text-green-700">{index + 1}</span>{stop}
+                  </li>)}</ol>
+                </div>
+              } */}
+              {/* {
+                segmentDistances.length > 0 && <div className="border-t border-[#dcfce7] px-5 py-4">
+                     <p className="mb-3 text-[10px] font-bold uppercase ">Fare by Route segment
+                      {segmentDistances.map((segmentKm, index) => {
+                        const from = index === 0  ? "pickup" : `stop ${index}`
+                        const to = index < stops.length ? `stop ${index +1 }` : "drop"
+                        const segmentfare = segmentKm * pricePerKm + (index === 0 ? baseFare : 0)
+                        return <div key={index} className="mb-2 flex items-center justify-between gap-3text-sm">
+                          <span className="text-gray-600">{from} {"=>"} {to} ({segmentKm.toFixed(2)} km)</span>
+                          <span className="font-semibold text-gray-900">{Math.round(segmentfare)}</span>
+                        </div>
+                      })}
+                     </p>
+                </div>
+              } */}
               {/* Total Fare */}
               <div className="flex items-end justify-between border-t border-[#dcfce7] pt-6">
                 <div>

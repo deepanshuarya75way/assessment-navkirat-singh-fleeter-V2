@@ -28,6 +28,7 @@ export async function POST(req: NextRequest) {
       pickUpAddress,
       dropAddress,
       pickUpLocation,
+      stops = [],
       dropLocation,
       fare,
       distance,
@@ -134,6 +135,13 @@ export async function POST(req: NextRequest) {
       pickUpAddress,
       dropAddress,
       distance,
+      stops : Array.isArray(stops) ? stops.slice(0,3).map((stop : any) => ({
+        address : String(stop.address) || "",
+        location : {
+          type : "Point",
+          coordinates : [Number(stop.location?.coordinates?.[0]), Number(stop.location?.coordinates?.[1])]
+        }
+      })) : [],
       pickupLocation: {
         type: "Point",
         coordinates: pickUpLocation.coordinates,

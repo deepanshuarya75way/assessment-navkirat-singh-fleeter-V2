@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
 	  const latitude = parseFloat(searchParams.get("latitude") || "0");
 	  const longitude = parseFloat(searchParams.get("longitude") || "0");
 	  const vehicleType = searchParams.get("vehicleType");
-  
+		
 	  if (!latitude || !longitude || !vehicleType) {
 		return Response.json({ message: "Missing data" }, { status: 400 });
 	  }
